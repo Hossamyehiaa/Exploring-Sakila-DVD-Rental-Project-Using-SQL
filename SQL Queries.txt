@@ -1,0 +1,141 @@
+Query 1: 
+-----------------
+
+SELECT t1.film_title, t1.category_name, t2.rental_count
+FROM(
+	SELECT f.film_id AS cfilmid,f.title AS film_title, c.name AS category_name
+	FROM film AS f
+	JOIN film_category AS fc
+	ON f.film_id = fc.film_id
+	JOIN category AS c
+	ON fc.category_id = c.category_id
+	WHERE c.name IN ('Animation', 'Children', 'Classics', 'Comedy', 'Family', 'Music')
+)t1
+JOIN(
+	SELECT f.film_id AS rfilmid, COUNT(r.rental_id) rental_count
+	FROM film AS f
+	JOIN inventory AS i
+	ON f.film_id = i.film_id
+	JOIN rental as r 
+	ON i.inventory_id = r.inventory_id
+	GROUP BY 1
+)t2
+ON t1.cfilmid = t2.rfilmid 
+ORDER BY 2,1
+-----------------------------------------------------------------------------------------------
+
+Query 2:
+-----------
+SELECT f.title AS film_title, c.name AS category_name,f.rental_duration, 
+	ntile(4) OVER(ORDER BY rental_duration) AS standard_quartile
+FROM film AS f
+JOIN film_category AS fc
+ON f.film_id = fc.film_id
+JOIN category AS c
+ON fc.category_id = c.category_id
+WHERE c.name IN ('Animation', 'Children', 'Classics', 'Comedy', 'Family', 'Music')
+------------------------------------------------------------------------------------------------
+
+Query 3:
+------------
+SELECT DISTINCT category_name, standard_qrt, 
+	COUNT(film_title) OVER(PARTITION BY category_name, standard_qrt)
+FROM(
+	SELECT c.name AS category_name, 
+		ntile(4) OVER(ORDER BY f.rental_duration) standard_qrt,f.title AS film_title
+	FROM film AS f
+	JOIN film_category AS fc
+	ON f.film_id = fc.film_id
+	JOIN category AS c
+	ON fc.category_id = c.category_id
+	WHERE c.name IN ('Animation', 'Children', 'Classics', 'Comedy', 'Family', 'Music')
+	)sub
+ORDER BY 1,2
+----------------------------------------------------------------------------------------------
+
+Query 4:
+------------
+SELECT DATE_PART('month', r.rental_date) rental_month, DATE_PART('year', r.rental_date) rental_year, s.store_id, COUNT(*)
+FROM store AS s
+JOIN staff AS sf
+ON s.store_id = sf.store_id
+JOIN rental AS r
+ON r.staff_id = sf.staff_id
+GROUP BY 1, 2, 3
+ORDER BY 4 DESC
+----------------------------------------------------------------------------------------------
+
+Query 5:
+------------
+SELECT t2.pay_mon, t1.full_name, t2.pay_count, t2.pay_amount
+FROM(
+SELECT CONCAT(c.first_name,' ',c.last_name) AS full_name,SUM(p.amount) 
+FROM customer AS c
+JOIN payment AS p
+ON c.customer_id = p.customer_id
+GROUP BY 1
+ORDER BY 2 DESC
+LIMIT 10
+) t1
+
+JOIN(
+SELECT DATE_TRUNC('month',p.payment_date) pay_mon, CONCAT(c.first_name,' ',c.last_name) AS full_name,
+	COUNT(c.customer_id) pay_count, SUM(p.amount) pay_amount
+FROM customer AS c
+JOIN payment AS p
+ON c.customer_id = p.customer_id
+WHERE p.payment_date BETWEEN '2007-01-01' AND '2007-12-31'
+GROUP BY 1,2
+) t2
+ON t1.full_name = t2.full_name
+ORDER BY 2,1
+---------------------------------------------------------------------------------------------------
+
+Query 6:
+------------
+WITH sum_generator AS (
+		SELECT CONCAT(c.first_name,' ',c.last_name) AS full_name,SUM(p.amount) 
+		FROM customer AS c
+		JOIN payment AS p
+		ON c.customer_id = p.customer_id
+		GROUP BY 1
+		ORDER BY 2 DESC
+		LIMIT 10
+),
+
+	count_generator AS (
+		SELECT DATE_TRUNC('month',p.payment_date) pay_mon, CONCAT(c.first_name,' ',c.last_name) AS full_name,
+		COUNT(c.customer_id) pay_count, SUM(p.amount) pay_amount
+		FROM customer AS c
+		JOIN payment AS p
+		ON c.customer_id = p.customer_id
+		WHERE p.payment_date BETWEEN '2007-01-01' AND '2007-12-31'
+		GROUP BY 1,2
+)
+
+SELECT ot1.f_name, ot2.max_diff
+FROM(
+	SELECT count_generator.pay_mon, sum_generator.full_name AS f_name, count_generator.pay_count, 
+		count_generator.pay_amount, (count_generator.pay_amount - 
+								 LAG(count_generator.pay_amount) 
+								 OVER(ORDER BY sum_generator.full_name, count_generator.pay_mon)) AS diff
+	FROM sum_generator 
+	JOIN count_generator
+	ON sum_generator.full_name = count_generator.full_name
+	ORDER BY 2,1	
+) ot1
+
+JOIN (
+	SELECT MAX(t3.diff) max_diff
+	FROM(
+		SELECT count_generator.pay_mon, sum_generator.full_name, count_generator.pay_count, 
+		count_generator.pay_amount, (count_generator.pay_amount - 
+									 LAG(count_generator.pay_amount) 
+									 OVER(ORDER BY sum_generator.full_name, count_generator.pay_mon)) AS diff
+		FROM sum_generator
+		JOIN count_generator
+		ON sum_generator.full_name = count_generator.full_name
+		ORDER BY 2,1
+	)t3
+)ot2
+ON ot2.max_diff = ot1.diff
